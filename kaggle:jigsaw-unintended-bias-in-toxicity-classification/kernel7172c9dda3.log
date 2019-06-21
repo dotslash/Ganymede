@@ -1,0 +1,89 @@
+[{
+  "data": "Using TensorFlow backend.\n",
+  "stream_name": "stderr",
+  "time": 1.8673562619951554
+},{
+  "data": "Found 2000000 word vectors.\n",
+  "stream_name": "stdout",
+  "time": 395.12155372599955
+},{
+  "data": "WARNING:tensorflow:From /opt/conda/lib/python3.6/site-packages/tensorflow/python/framework/op_def_library.py:263: colocate_with (from tensorflow.python.framework.ops) is deprecated and will be removed in a future version.\nInstructions for updating:\nColocations handled automatically by placer.\n",
+  "stream_name": "stderr",
+  "time": 399.69260446999397
+},{
+  "data": "WARNING:tensorflow:From /opt/conda/lib/python3.6/site-packages/keras/backend/tensorflow_backend.py:3445: calling dropout (from tensorflow.python.ops.nn_ops) with keep_prob is deprecated and will be removed in a future version.\nInstructions for updating:\nPlease use `rate` instead of `keep_prob`. Rate should be set to `rate = 1 - keep_prob`.\n",
+  "stream_name": "stderr",
+  "time": 399.7155246159964
+},{
+  "data": "../src/script.py:87: UserWarning: Update your `Model` call to the Keras 2 API: `Model(inputs=Tensor(\"in..., outputs=Tensor(\"de...)`\n  model = Model(inputs=inp, output=result)\n",
+  "stream_name": "stderr",
+  "time": 400.7652720139886
+},{
+  "data": "WARNING:tensorflow:From /opt/conda/lib/python3.6/site-packages/tensorflow/python/ops/math_ops.py:3066: to_int32 (from tensorflow.python.ops.math_ops) is deprecated and will be removed in a future version.\nInstructions for updating:\nUse tf.cast instead.\n",
+  "stream_name": "stderr",
+  "time": 400.92909423299716
+},{
+  "data": "WARNING:tensorflow:From /opt/conda/lib/python3.6/site-packages/tensorflow/python/ops/math_grad.py:102: div (from tensorflow.python.ops.math_ops) is deprecated and will be removed in a future version.\nInstructions for updating:\nDeprecated in favor of operator or tf.math.divide.\n",
+  "stream_name": "stderr",
+  "time": 401.1220148329885
+},{
+  "data": "Train on 1263411 samples, validate on 541463 samples\n",
+  "stream_name": "stdout",
+  "time": 404.67657863099885
+},{
+  "data": "Epoch 1/1\n",
+  "stream_name": "stdout",
+  "time": 404.6836775720003
+},{
+  "data": "2019-06-16 22:35:10.680954: I tensorflow/core/platform/profile_utils/cpu_utils.cc:94] CPU Frequency: 2300000000 Hz\n",
+  "stream_name": "stderr",
+  "time": 404.7334374149941
+},{
+  "data": "2019-06-16 22:35:10.681383: I tensorflow/compiler/xla/service/service.cc:150] XLA service 0x55f96612b910 executing computations on platform Host. Devices:\n2019-06-16 22:35:10.681484: I tensorflow/compiler/xla/service/service.cc:158]   StreamExecutor device (0): <undefined>, <undefined>\n",
+  "stream_name": "stderr",
+  "time": 404.7387403569883
+},{
+  "data": "2019-06-16 22:35:10.814223: I tensorflow/stream_executor/cuda/cuda_gpu_executor.cc:998] successful NUMA node read from SysFS had negative value (-1), but there must be at least one NUMA node, so returning NUMA node zero\n",
+  "stream_name": "stderr",
+  "time": 404.86715773098695
+},{
+  "data": "2019-06-16 22:35:10.815710: I tensorflow/compiler/xla/service/service.cc:150] XLA service 0x55f966184e70 executing computations on platform CUDA. Devices:\n2019-06-16 22:35:10.815753: I tensorflow/compiler/xla/service/service.cc:158]   StreamExecutor device (0): Tesla P100-PCIE-16GB, Compute Capability 6.0\n2019-06-16 22:35:10.816115: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1433] Found device 0 with properties: \nname: Tesla P100-PCIE-16GB major: 6 minor: 0 memoryClockRate(GHz): 1.3285\npciBusID: 0000:00:04.0\ntotalMemory: 15.90GiB freeMemory: 15.64GiB\n2019-06-16 22:35:10.816174: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1512] Adding visible gpu devices: 0\n",
+  "stream_name": "stderr",
+  "time": 404.8742753939878
+},{
+  "data": "2019-06-16 22:35:11.435742: I tensorflow/core/common_runtime/gpu/gpu_device.cc:984] Device interconnect StreamExecutor with strength 1 edge matrix:\n2019-06-16 22:35:11.435811: I tensorflow/core/common_runtime/gpu/gpu_device.cc:990]      0 \n2019-06-16 22:35:11.435829: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1003] 0:   N \n",
+  "stream_name": "stderr",
+  "time": 405.48855177799123
+},{
+  "data": "2019-06-16 22:35:11.436051: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1115] Created TensorFlow device (/job:localhost/replica:0/task:0/device:GPU:0 with 15148 MB memory) -> physical GPU (device: 0, name: Tesla P100-PCIE-16GB, pci bus id: 0000:00:04.0, compute capability: 6.0)\n",
+  "stream_name": "stderr",
+  "time": 405.4928506009892
+},{
+  "data": "2019-06-16 22:35:12.379714: W tensorflow/core/framework/allocator.cc:124] Allocation of 492056400 exceeds 10% of system memory.\n",
+  "stream_name": "stderr",
+  "time": 406.43278701699455
+},{
+  "data": "2019-06-16 22:35:12.773865: W tensorflow/core/framework/allocator.cc:124] Allocation of 492056400 exceeds 10% of system memory.\n",
+  "stream_name": "stderr",
+  "time": 406.8264799089957
+},{
+  "data": "2019-06-16 22:35:14.099548: W tensorflow/core/framework/allocator.cc:124] Allocation of 492056400 exceeds 10% of system memory.\n",
+  "stream_name": "stderr",
+  "time": 408.15238952198706
+},{
+  "data": "2019-06-16 22:35:14.487300: W tensorflow/core/framework/allocator.cc:124] Allocation of 492056400 exceeds 10% of system memory.\n",
+  "stream_name": "stderr",
+  "time": 408.54013244999805
+},{
+  "data": "2019-06-16 22:35:14.873363: W tensorflow/core/framework/allocator.cc:124] Allocation of 492056400 exceeds 10% of system memory.\n",
+  "stream_name": "stderr",
+  "time": 408.92613891599467
+},{
+  "data": "2019-06-16 22:35:21.067509: I tensorflow/stream_executor/dso_loader.cc:152] successfully opened CUDA library libcublas.so.10.0 locally\n",
+  "stream_name": "stderr",
+  "time": 415.12005783600034
+},{
+  "data": " - 14424s - loss: 0.2360 - val_loss: 0.2417\n",
+  "stream_name": "stdout",
+  "time": 14828.387766161992
+}]
