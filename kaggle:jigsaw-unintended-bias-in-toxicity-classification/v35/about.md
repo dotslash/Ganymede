@@ -26,7 +26,7 @@ sample_weights /= sample_weights.mean()
 
 
 Model fitting
-```
+```python3
 for model_idx in range(2):
   model = build_model(embedding_matrix, y_other_train.shape[-1])
   for global_epoch in range(NUM_EPOCHS):
