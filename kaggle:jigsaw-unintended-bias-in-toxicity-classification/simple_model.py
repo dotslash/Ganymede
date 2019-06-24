@@ -1,18 +1,18 @@
-import pandas
-import numpy as np
-import tensorflow as tf
 import datetime
-
-from keras.preprocessing import text, sequence
 from typing import List, Tuple, Dict, Callable
-from keras.callbacks import EarlyStopping
+
+import numpy as np
+import pandas
+import tensorflow as tf
+from keras.callbacks import LearningRateScheduler
 from keras.initializers import Constant
-from keras.layers import Embedding
-from keras.layers import Input, Dense, SpatialDropout1D
 from keras.layers import Bidirectional, GlobalMaxPooling1D
+from keras.layers import Embedding
 from keras.layers import GlobalAveragePooling1D, CuDNNLSTM
+from keras.layers import Input, Dense, SpatialDropout1D
 from keras.layers import add, concatenate
 from keras.models import Model
+from keras.preprocessing import text, sequence
 
 # Flags.
 LSTM_UNITS: int = 128
@@ -22,7 +22,7 @@ USE_CATEGORY_COLS: bool = True
 TESTING_MODE: bool = False
 ENABLE_TEXT_PROCESSING: bool = True
 BATCH_SIZE: int = 1024
-NUM_EPOCHS: int = 20
+NUM_EPOCHS: int = 3
 TOKENIZER_NUM_WORDS: int = 50000
 
 # Facts.
@@ -363,7 +363,7 @@ def construct_embedding_matrix(tokenizer: text.Tokenizer) -> np.array:
 
 def main():
     x_train, y_train, y_other_train, x_test, train_data, \
-        test_data, tokenizer = load_train_data()
+    test_data, tokenizer = load_train_data()
     embedding_matrix = construct_embedding_matrix(tokenizer)
     sample_weights: pandas.Series = pandas.Series(
         data=np.ones(len(x_train), dtype=np.float32))
@@ -388,29 +388,41 @@ def main():
     model = build_model(embedding_matrix, len(CATEGORY_COLS))
     # Fit the model.
     logger.log('Training model.')
-    early_stopping = EarlyStopping(monitor='val_loss', patience=3, verbose=1,
-                                   mode='min')
-    if USE_CATEGORY_COLS:
-        model.fit(
-            x_train, [y_train, y_other_train],
-            validation_split=0.1,
-            batch_size=BATCH_SIZE,
-            epochs=NUM_EPOCHS,
-            # One set of sample_weights for each output
-            sample_weight=[sample_weights.values, sample_weights.values],
-            callbacks=[early_stopping])
-        logger.log('Trained model.')
-        y_test = model.predict(x_test, batch_size=2048)[0]
-    else:
-        model.fit(
-            x_train, [y_train],
-            validation_split=0.1,
-            batch_size=BATCH_SIZE,
-            epochs=NUM_EPOCHS,
-            sample_weight=sample_weights.values,
-            callbacks=[early_stopping])
-        logger.log('Trained model.')
-        y_test = model.predict(x_test, batch_size=2048)
+    # Learning rate scheduler.
+    # TODO(dotslash): How does this help?
+    learning_rate_ctrl = LearningRateScheduler(
+        lambda _: 1e-3 * (0.55 ** global_epoch))
+    checkpoint_predictions = []
+    weights = []
+    for model_idx in range(2):
+        model = build_model(embedding_matrix, y_other_train.shape[-1])
+        for global_epoch in range(NUM_EPOCHS):
+            weights.append(2 ** global_epoch)
+            if USE_CATEGORY_COLS:
+                model.fit(
+                    x_train, [y_train, y_other_train],
+                    validation_split=0.1,
+                    batch_size=BATCH_SIZE,
+                    epochs=1,
+                    # One set of sample_weights for each output
+                    sample_weight=[sample_weights.values,
+                                   sample_weights.values],
+                    callbacks=[learning_rate_ctrl])
+                logger.log('Trained model.')
+                checkpoint_predictions.append(
+                    model.predict(x_test, batch_size=2048)[0])
+            else:
+                model.fit(
+                    x_train, [y_train],
+                    validation_split=0.1,
+                    batch_size=BATCH_SIZE,
+                    epochs=1,
+                    sample_weight=sample_weights.values,
+                    callbacks=[learning_rate_ctrl])
+                logger.log('Trained model.')
+                checkpoint_predictions.append(
+                    model.predict(x_test, batch_size=2048))
+    y_test = np.average(checkpoint_predictions, weights=weights, axis=0)
     logger.log('Predicted test set.')
     submission = pandas.DataFrame.from_dict({
         'id': test_data.id,
