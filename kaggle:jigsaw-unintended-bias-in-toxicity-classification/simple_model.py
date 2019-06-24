@@ -9,6 +9,7 @@ from keras.layers import Input, Dense, SpatialDropout1D, add, concatenate
 from keras.layers import Bidirectional, GlobalMaxPooling1D, \
     GlobalAveragePooling1D, CuDNNLSTM
 from typing import List, Tuple, Dict, Callable
+import tensorflow as tf
 import datetime
 
 CATEGORY_COLS: List[str] = ['severe_toxicity', 'obscene', 'identity_attack',
@@ -36,7 +37,7 @@ BATCH_SIZE: int = 1024
 NUM_EPOCHS: int = 20
 # TEXT PROCESSING STUFF (NOT SURE IF THIS HELPS)
 # TODO(dotslash): Cleanup this mapping.
-CONTRACTION_MAPPING = {
+CONTRACTION_MAPPING: Dict[str, str] = {
     "'cause": "because",
     "ain't": "is not",
     "aren't": "are not",
@@ -244,6 +245,11 @@ def get_top_words(tokenizer: text.Tokenizer):
     return ret[:tokenizer.num_words]
 
 
+def binary_accuracy(y_true: tf.Tensor, y_pred: tf.Tensor):
+    import keras.backend as kb
+    return kb.mean(kb.equal(kb.round(y_true), kb.round(y_pred)))
+
+
 def build_model(embedding_matrix: np.array, num_other_results: int):
     inp = Input(shape=(MAS_SEQUENCE_LENGTH,))
     x = Embedding(embedding_matrix.shape[0], embedding_matrix.shape[1],
@@ -264,7 +270,8 @@ def build_model(embedding_matrix: np.array, num_other_results: int):
         model = Model(inputs=inp, outputs=[result, other_results])
     else:
         model = Model(inputs=inp, outputs=[result])
-    model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['acc'])
+    model.compile(loss='binary_crossentropy', optimizer='adam',
+                  metrics=['acc', binary_accuracy])
     return model
 
 
@@ -381,9 +388,9 @@ def main():
             x_train, [y_train, y_other_train],
             validation_split=0.1,
             batch_size=BATCH_SIZE,
-            epochs=NUM_EPOCHS, verbose=1,
+            epochs=NUM_EPOCHS,
             sample_weight=sample_weights.values,
-            callbacks=[early_stopping ])
+            callbacks=[early_stopping])
         logger.log('Trained model.')
         y_test = model.predict(x_test, batch_size=2048)[0]
     else:
@@ -391,7 +398,7 @@ def main():
             x_train, [y_train],
             validation_split=0.1,
             batch_size=BATCH_SIZE,
-            epochs=NUM_EPOCHS, verbose=1,
+            epochs=NUM_EPOCHS,
             sample_weight=sample_weights.values,
             callbacks=[early_stopping])
         logger.log('Trained model.')
