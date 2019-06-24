@@ -1,16 +1,18 @@
 import pandas
 import numpy as np
-from keras.callbacks import EarlyStopping
-from keras.preprocessing import text, sequence
-from keras.layers import Embedding
-from keras.initializers import Constant
-from keras.models import Model
-from keras.layers import Input, Dense, SpatialDropout1D, add, concatenate
-from keras.layers import Bidirectional, GlobalMaxPooling1D, \
-    GlobalAveragePooling1D, CuDNNLSTM
-from typing import List, Tuple, Dict, Callable
 import tensorflow as tf
 import datetime
+
+from keras.preprocessing import text, sequence
+from typing import List, Tuple, Dict, Callable
+from keras.callbacks import EarlyStopping
+from keras.initializers import Constant
+from keras.layers import Embedding
+from keras.layers import Input, Dense, SpatialDropout1D
+from keras.layers import Bidirectional, GlobalMaxPooling1D
+from keras.layers import GlobalAveragePooling1D, CuDNNLSTM
+from keras.layers import add, concatenate
+from keras.models import Model
 
 # Flags.
 LSTM_UNITS: int = 128
@@ -38,9 +40,8 @@ TEST_FILE: str = \
 EMBEDDING_FILES: List[str] = [
     '../input/fasttext-crawl-300d-2m/crawl-300d-2M.vec',
     '../input/glove840b300dtxt/glove.840B.300d.txt']
-# Data + Facts
+# Facts in the form of Data.
 # TEXT PROCESSING STUFF (NOT SURE IF THIS HELPS)
-# TODO(dotslash): Cleanup this mapping.
 CONTRACTION_MAPPING: Dict[str, str] = {
     "'cause": "because",
     "ain't": "is not",
@@ -395,7 +396,8 @@ def main():
             validation_split=0.1,
             batch_size=BATCH_SIZE,
             epochs=NUM_EPOCHS,
-            sample_weight=sample_weights.values,
+            # One set of sample_weights for each output
+            sample_weight=[sample_weights.values, sample_weights.values],
             callbacks=[early_stopping])
         logger.log('Trained model.')
         y_test = model.predict(x_test, batch_size=2048)[0]
