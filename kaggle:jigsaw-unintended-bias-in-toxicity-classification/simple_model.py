@@ -24,6 +24,7 @@ ENABLE_TEXT_PROCESSING: bool = False
 BATCH_SIZE: int = 1024
 NUM_EPOCHS: int = 3
 TOKENIZER_NUM_WORDS: int = 50000
+NUM_MODELS:int = 2
 
 # Facts.
 CATEGORY_COLS: List[str] = ['severe_toxicity', 'obscene', 'identity_attack',
@@ -394,7 +395,7 @@ def main():
         lambda _: 1e-3 * (0.55 ** global_epoch))
     checkpoint_predictions = []
     weights = []
-    for model_idx in range(2):
+    for model_idx in range(NUM_MODELS):
         model = build_model(embedding_matrix, y_other_train.shape[-1])
         for global_epoch in range(NUM_EPOCHS):
             weights.append(2 ** global_epoch)
