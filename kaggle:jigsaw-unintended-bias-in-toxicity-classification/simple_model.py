@@ -387,6 +387,11 @@ def main():
     weights = []
     for model_idx in range(NUM_MODELS):
         model = build_model(embedding_matrix, y_other_train.shape[-1])
+        merge = np.concatenate((x_train, y_train, y_other_train), axis=1)
+        np.random.shuffle(merge)
+        x_train = merge[:,len(x_train[0])]
+        y_train = merge[:len(x_train[0]), len(x_train[0])+1]
+        y_other_train = merge[:len(x_train[0])]
         for global_epoch in range(NUM_EPOCHS):
             model.fit(
                 x_train, [y_train, y_other_train],
