@@ -17,7 +17,6 @@ from keras.optimizers import Adam
 from keras_vggface import VGGFace
 
 PersonId = Tuple[str, str]
-# TrainValDataType = Tuple[Tuple[List[np.ndarray], List[np.ndarray]], List[int]]
 TrainValDataType = Iterator[Tuple[List[np.ndarray], List[int]]]
 TestDataType = Tuple[List[np.ndarray], List[np.ndarray], List[str]]
 
@@ -33,13 +32,22 @@ def full_dir_path(relative_path: str) -> str:
 
 @attr.s
 class Params(object):
+    # Test mode runs quickly and produces horrible results!
+    test_mode: float = attr.attrib(default=True)
+
     families_val_split: float = attr.attrib(default=0.1)
     input_data_dir: str = attr.attrib(default=full_dir_path('../input/'))
-    output_data_dir: str = attr.attrib(default=full_dir_path('./output/'))
-    negative_ratio: float = attr.attrib(default=0.5)
+    output_data_dir: str = attr.attrib(default=full_dir_path('./'))
+    # 1 +ve sample, 1 -ve sample.
+    negative_sample_ratio: float = attr.attrib(default=0.5)
+    # Batches of 32 (16 +ve, 16 -ve)
     batch_size: int = attr.attrib(default=32)
-    test_mode: float = attr.attrib(default=True)
-    epochs: int = attr.attrib(default=1)
+    # initiate_config overrides this in test_mode
+    epochs: int = attr.attrib(default=100)
+    # initiate_config overrides this in test_mode
+    steps_per_epoch: int = attr.attrib(default=200)
+    # initiate_config overrides this in test_mode
+    validation_steps: int = attr.attrib(default=100)
 
     def get_inp_path(self, file_name):
         return self.input_data_dir + file_name
@@ -47,21 +55,31 @@ class Params(object):
     def get_out_path(self, file_name):
         return self.output_data_dir + file_name
 
-    def try_updating_from_config(self):
+    def initiate_config(self):
         try:
             config_path = path.abspath(path.dirname(__file__) + '/config.json')
             with open(config_path, "r") as f:
                 config = json.load(f)
-                print("Before try_updating_from_config:", self)
-                self.input_data_dir = full_dir_path(config.get('input_data_dir',
-                                                               self.input_data_dir))
+                print("Before initiate_config:", self)
+                # TODO(stps): Loading every single setting from json is tedious.
+                #             This can probably be done automatically.
+                self.input_data_dir = full_dir_path(
+                    config.get('input_data_dir', self.input_data_dir))
                 self.output_data_dir = full_dir_path(
                     config.get('output_data_dir', self.input_data_dir))
                 self.test_mode = config.get('test_mode', self.test_mode)
                 self.epochs = config.get('epochs', self.epochs)
-            print("After try_updating_from_config:", self)
+                self.validation_steps = config.get('validation_steps',
+                                                   self.validation_steps)
+                self.steps_per_epoch = config.get('steps_per_epoch',
+                                                  self.steps_per_epoch)
+            print("After initiate_config:", self)
         except Exception as e:
             print(e)
+        if self.test_mode:
+            self.epochs = min(self.epochs, 5)
+            self.validation_steps = min(self.validation_steps, 5)
+            self.steps_per_epoch = min(self.steps_per_epoch, 2)
 
 
 class Data:
@@ -139,14 +157,6 @@ class Data:
             else:
                 self.train_people.append(person)
 
-        # # Generate Train and validation data.
-        # self.train_data: TrainValDataType = self._gen_train_or_val_data(
-        #     self.train_relations,
-        #     self.train_people)
-        # self.val_data: TrainValDataType = self._gen_train_or_val_data(
-        #     self.val_relations,
-        #     self.val_people)
-
         # Generate test data.
         # [img_par], [p1_image], [p2_image]
         self.test_data: TestDataType = ([], [], [])
@@ -165,45 +175,14 @@ class Data:
         if failed_image_pairs:
             print("Failed to find {} image pairs".format(
                 len(failed_image_pairs)))
-            print("pairs: ", ','.join(failed_image_pairs))
-
-    # def _gen_train_or_val_data(
-    #         self, relations: List[Tuple[PersonId, PersonId]],
-    #         people: List[PersonId]) \
-    #         -> Tuple[List[np.ndarray], List[np.ndarray], List[int]]:
-    #     x1: List[np.ndarray] = []
-    #     x2: List[np.ndarray] = []
-    #     out: List[int] = []
-    #     for p1, p2 in relations:
-    #         if p1 not in self.images or p2 not in self.images:
-    #             continue
-    #         for p1img in self.images.get(p1):
-    #             for p2img in self.images.get(p2):
-    #                 x1.append(p1img)
-    #                 x2.append(p2img)
-    #                 out.append(1)
-    #         if self.params.test_mode and len(x1) > 50:
-    #             break
-    #     positives = len(x1)
-    #     negatives = int(self.params.negative_ratio * positives)
-    #     while len(out) < positives + negatives:
-    #         p1 = random.choice(people)
-    #         p2 = random.choice(people)
-    #         if (p1, p2) in relations or (p2, p1) in relations:
-    #             continue
-    #         x1.append(random.choice(self.images[p1]))
-    #         x2.append(random.choice(self.images[p2]))
-    #         out.append(0)
-    #     tmp = list(zip(x1, x2, out))
-    #     random.shuffle(tmp)
-    #     x1, x2, out = zip(*tmp)
-    #     return list(x1), list(x2), list(out)
+            print("pairs: ", ','.join(failed_image_pairs)[:500], " ...")
 
     def train_or_val_batch_generator(
             self, relations: List[Tuple[PersonId, PersonId]],
             people: List[PersonId]) -> \
             Iterator[TrainValDataType]:
-        negatives = int(self.params.batch_size * self.params.negative_ratio)
+        negatives = int(
+            self.params.batch_size * self.params.negative_sample_ratio)
         positives = self.params.batch_size - negatives
         while True:
             x1: List[np.ndarray] = []
@@ -230,14 +209,6 @@ class Data:
                 out.append(0)
             yield [np.array(x1), np.array(x2)], out
 
-    # def get_train_data(self) -> \
-    #         Tuple[List[np.ndarray], List[np.ndarray], List[int]]:
-    #     return self.train_data
-    #
-    # def get_val_data(self) -> \
-    #         Tuple[List[np.ndarray], List[np.ndarray], List[int]]:
-    #     return self.val_data
-
     def get_test_data(self) -> \
             Tuple[List[np.ndarray], List[np.ndarray], List[str]]:
         return self.test_data
@@ -256,7 +227,7 @@ class Data:
             np.stack(self.test_data[1]).shape))
         for X, y in self.train_batch_generator():
             print('Train batch shapes: x1: {} x2: {} y: {}'.format(
-                    X[0].shape, X[1].shape, len(y)))
+                X[0].shape, X[1].shape, len(y)))
             break
         for X, y in self.val_batch_generator():
             print('Val batch shapes: x1: {} x2: {} y: {}'.format(
@@ -301,12 +272,11 @@ def create_model() -> Model:
 
 def main() -> None:
     params: Params = Params()
-    params.try_updating_from_config()
+    params.initiate_config()
     print("Params: ", params)
     data: Data = Data(params)
     data.print_summary()
     model = create_model()
-    # TODO(stps): Early stopping.
     save_best_model = ModelCheckpoint(params.get_out_path('best_model.h5'),
                                       monitor='val_acc', verbose=1,
                                       save_best_only=True)
@@ -316,15 +286,10 @@ def main() -> None:
         period=10)
     control_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=10)
     stop_early = EarlyStopping(monitor='val_loss', patience=20)
-    steps_per_epoch = 200
-    validation_steps = 100
-    if params.test_mode:
-        steps_per_epoch = 2
-        validation_steps = 1
     model.fit_generator(generator=data.train_batch_generator(),
                         validation_data=data.val_batch_generator(),
-                        steps_per_epoch=steps_per_epoch,
-                        validation_steps=validation_steps,
+                        steps_per_epoch=params.steps_per_epoch,
+                        validation_steps=params.validation_steps,
                         epochs=params.epochs,
                         callbacks=[save_models, save_best_model, control_lr,
                                    stop_early])

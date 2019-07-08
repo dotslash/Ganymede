@@ -1,6 +1,8 @@
 {
   "input_data_dir": "~/data/kaggle/recognizing-faces-in-the-wild",
-  "output_data_dir": "/tmp/kaggle/",
+  "output_data_dir": "/tmp/",
   "test_mode": true,
-  "epochs": 1
+  "epochs": 1,
+  "validation_steps": 2,
+  "steps_per_epoch": 1
 }
