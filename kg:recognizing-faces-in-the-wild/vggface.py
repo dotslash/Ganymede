@@ -22,8 +22,6 @@ TestDataType = Tuple[List[np.ndarray], List[np.ndarray], List[str]]
 
 
 def full_dir_path(relative_path: str) -> str:
-    if relative_path.startswith('..'):
-        return relative_path
     ret = path.abspath(path.expanduser(relative_path))
     if not ret.endswith('/'):
         ret = ret + '/'
@@ -33,7 +31,7 @@ def full_dir_path(relative_path: str) -> str:
 @attr.s
 class Params(object):
     # Test mode runs quickly and produces horrible results!
-    test_mode: float = attr.attrib(default=True)
+    test_mode: float = attr.attrib(default=False)
 
     families_val_split: float = attr.attrib(default=0.1)
     input_data_dir: str = attr.attrib(default=full_dir_path('../input/'))
@@ -61,21 +59,14 @@ class Params(object):
             with open(config_path, "r") as f:
                 config = json.load(f)
                 print("Before initiate_config:", self)
-                # TODO(stps): Loading every single setting from json is tedious.
-                #             This can probably be done automatically.
-                self.input_data_dir = full_dir_path(
-                    config.get('input_data_dir', self.input_data_dir))
-                self.output_data_dir = full_dir_path(
-                    config.get('output_data_dir', self.input_data_dir))
-                self.test_mode = config.get('test_mode', self.test_mode)
-                self.epochs = config.get('epochs', self.epochs)
-                self.validation_steps = config.get('validation_steps',
-                                                   self.validation_steps)
-                self.steps_per_epoch = config.get('steps_per_epoch',
-                                                  self.steps_per_epoch)
+                for k, v in config.items():
+                    if k.endswith('_dir'):
+                        v = full_dir_path(v)
+                    self.__dict__[k] = v
             print("After initiate_config:", self)
         except Exception as e:
-            print(e)
+            print("Exception while loading config.json. This is okay when "
+                  "running on kaggle. Error:", e)
         if self.test_mode:
             self.epochs = min(self.epochs, 5)
             self.validation_steps = min(self.validation_steps, 5)
@@ -84,45 +75,81 @@ class Params(object):
 
 class Data:
     @staticmethod
-    def image_bytes_to_array(filepath: str) -> np.ndarray:
+    def _load_image_as_array(filepath: str) -> np.ndarray:
         with open(filepath, 'rb') as f:
             # noinspection PyTypeChecker
             nparr = np.fromstring(f.read(), np.uint8)
             # noinspection PyUnresolvedReferences
             return cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-    def _load_train_images(self) -> Dict[PersonId, List[np.ndarray]]:
+    @staticmethod
+    def _load_train_images(params: Params) -> Dict[PersonId, List[np.ndarray]]:
         ret: Dict[PersonId, List[np.ndarray]] = {}
-        all_images = glob(self.params.get_inp_path('train/') + "*/*/*.jpg")
+        all_images = glob(params.get_inp_path('train/') + "*/*/*.jpg")
         for name in all_images:
-            img_np = Data.image_bytes_to_array(name)
-            family, person = name.split('/')[-3], name.split('/')[-2]
-            p: PersonId = (family, person)
+            img_np = Data._load_image_as_array(name)
+            p: PersonId = (name.split('/')[-3], name.split('/')[-2])
             if p not in ret:
                 ret[p] = []
             ret[p].append(img_np)
-            if self.params.test_mode and len(ret) > 200:
-                print(sum(len(x) for x in ret.values()))
+            if params.test_mode and len(ret) > 200:
                 break
+        print("Train+Val images: ", sum(len(x) for x in ret.values()))
+        print("Train+Val people: ", len(ret))
         return ret
 
-    def _load_test_images(self) -> Dict[str, np.ndarray]:
+    @staticmethod
+    def _load_test_images(params: Params) -> Dict[str, np.ndarray]:
         ret: Dict[str, np.ndarray] = {}
-        all_images = glob(self.params.get_inp_path('test/') + "*.jpg")
+        all_images = glob(params.get_inp_path('test/') + "*.jpg")
         for name in all_images:
-            if not name.endswith('.jpg'):
-                continue
-            img_np = Data.image_bytes_to_array(name)
+            img_np = Data._load_image_as_array(name)
             ret[name.split('/')[-1]] = img_np
-            if self.params.test_mode and len(ret) > 500:
+            if params.test_mode and len(ret) > 500:
                 break
+        print("Test images: ", len(ret))
         return ret
+
+    @staticmethod
+    def _train_or_val_batch_generator(
+            params: Params, images: Dict[PersonId, List[np.ndarray]],
+            relations: List[Tuple[PersonId, PersonId]],
+            people: List[PersonId]) -> \
+            Iterator[TrainValDataType]:
+        negatives = int(
+            params.batch_size * params.negative_sample_ratio)
+        positives = params.batch_size - negatives
+        while True:
+            x1: List[np.ndarray] = []
+            x2: List[np.ndarray] = []
+            out: List[int] = []
+            while len(x1) < positives:
+                p1, p2 = random.choice(relations)
+                if p1 not in images or p2 not in images:
+                    continue
+                p1img, p2img = random.choice(images[p1]), \
+                               random.choice(images[p2])
+                x1.append(p1img)
+                x2.append(p2img)
+                out.append(1)
+            while len(x1) < positives + negatives:
+                p1 = random.choice(people)
+                p2 = random.choice(people)
+                if (p1, p2) in relations or (p2, p1) in relations:
+                    continue
+                p1img, p2img = random.choice(images[p1]), \
+                               random.choice(images[p2])
+                x1.append(p1img)
+                x2.append(p2img)
+                out.append(0)
+            yield [np.array(x1), np.array(x2)], out
 
     def __init__(self, params: Params):
         self.params = params
         self.images: Dict[
-            PersonId, List[np.ndarray]] = self._load_train_images()
-        self.test_images: Dict[str, np.ndarray] = self._load_test_images()
+            PersonId, List[np.ndarray]] = Data._load_train_images(self.params)
+        self.test_images: Dict[str, np.ndarray] = Data._load_test_images(
+            self.params)
 
         # Generate validation relations and train relations.
         # noinspection PyTypeChecker
@@ -177,49 +204,19 @@ class Data:
                 len(failed_image_pairs)))
             print("pairs: ", ','.join(failed_image_pairs)[:500], " ...")
 
-    def train_or_val_batch_generator(
-            self, relations: List[Tuple[PersonId, PersonId]],
-            people: List[PersonId]) -> \
-            Iterator[TrainValDataType]:
-        negatives = int(
-            self.params.batch_size * self.params.negative_sample_ratio)
-        positives = self.params.batch_size - negatives
-        while True:
-            x1: List[np.ndarray] = []
-            x2: List[np.ndarray] = []
-            out: List[int] = []
-            while len(x1) < positives:
-                p1, p2 = random.choice(relations)
-                if p1 not in self.images or p2 not in self.images:
-                    continue
-                p1img, p2img = random.choice(self.images[p1]), \
-                               random.choice(self.images[p2])
-                x1.append(p1img)
-                x2.append(p2img)
-                out.append(1)
-            while len(x1) < positives + negatives:
-                p1 = random.choice(people)
-                p2 = random.choice(people)
-                if (p1, p2) in relations or (p2, p1) in relations:
-                    continue
-                p1img, p2img = random.choice(self.images[p1]), \
-                               random.choice(self.images[p2])
-                x1.append(p1img)
-                x2.append(p2img)
-                out.append(0)
-            yield [np.array(x1), np.array(x2)], out
-
     def get_test_data(self) -> \
             Tuple[List[np.ndarray], List[np.ndarray], List[str]]:
         return self.test_data
 
     def val_batch_generator(self) -> Iterator[TrainValDataType]:
-        return self.train_or_val_batch_generator(self.val_relations,
-                                                 self.val_people)
+        return Data._train_or_val_batch_generator(self.params, self.images,
+                                                  self.val_relations,
+                                                  self.val_people)
 
     def train_batch_generator(self) -> Iterator[TrainValDataType]:
-        return self.train_or_val_batch_generator(self.train_relations,
-                                                 self.train_people)
+        return Data._train_or_val_batch_generator(self.params, self.images,
+                                                  self.train_relations,
+                                                  self.train_people)
 
     def print_summary(self):
         print('Test data info: i1-shape: {} i2-shape: {}'.format(
@@ -259,11 +256,10 @@ def create_model() -> Model:
     # concat(x1.x2, (x1-x2)**2)
     x = Concatenate()([Multiply()([x1, x2]), diff_squared])
     x = Dense(100, activation="relu")(x)
-    # TODO(stps): Not sure about the dropout prob.
+    # TODO(dotslash): Not sure about the dropout prob.
     x = Dropout(0.2)(x)
     out = Dense(1, activation="sigmoid")(x)
     model = Model([input1, input2], out)
-    # TODO(stps): Adaptive learning rate?
     model.compile(loss="binary_crossentropy", metrics=['acc'],
                   optimizer=Adam(0.00001))
     model.summary()
@@ -273,17 +269,12 @@ def create_model() -> Model:
 def main() -> None:
     params: Params = Params()
     params.initiate_config()
-    print("Params: ", params)
     data: Data = Data(params)
     data.print_summary()
     model = create_model()
     save_best_model = ModelCheckpoint(params.get_out_path('best_model.h5'),
                                       monitor='val_acc', verbose=1,
                                       save_best_only=True)
-    save_models = ModelCheckpoint(
-        params.get_out_path(
-            params.get_out_path('check_point_model{epoch:08d}.h5')), verbose=1,
-        period=10)
     control_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=10)
     stop_early = EarlyStopping(monitor='val_loss', patience=20)
     model.fit_generator(generator=data.train_batch_generator(),
@@ -291,8 +282,7 @@ def main() -> None:
                         steps_per_epoch=params.steps_per_epoch,
                         validation_steps=params.validation_steps,
                         epochs=params.epochs,
-                        callbacks=[save_models, save_best_model, control_lr,
-                                   stop_early])
+                        callbacks=[save_best_model, control_lr, stop_early])
     predictions = model.predict_on_batch(
         x=[data.test_data[0], data.test_data[1]])
     submission = pandas.DataFrame(
