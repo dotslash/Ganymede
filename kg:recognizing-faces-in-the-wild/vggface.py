@@ -1,20 +1,22 @@
 import json
+import os
 import random
 from glob import glob
 from os import path
 from typing import Dict, Tuple, List, Set, Callable, Iterator
 
 import attr
-import cv2
 import numpy as np
 import pandas
 from keras import Input, Model
-from keras.callbacks import ModelCheckpoint, ReduceLROnPlateau, EarlyStopping
+from keras.callbacks import ModelCheckpoint, ReduceLROnPlateau, Callback
 from keras.engine import InputLayer
 from keras.layers import Concatenate, GlobalMaxPool2D, Subtract, Multiply, \
     Dense, Dropout, GlobalAvgPool2D
 from keras.optimizers import Adam
+from keras_preprocessing import image
 from keras_vggface import VGGFace
+from keras_vggface.utils import preprocess_input
 
 PersonId = Tuple[str, str]
 TrainValDataType = Iterator[Tuple[List[np.ndarray], List[int]]]
@@ -36,16 +38,18 @@ class Params(object):
     families_val_split: float = attr.attrib(default=0.1)
     input_data_dir: str = attr.attrib(default=full_dir_path('../input/'))
     output_data_dir: str = attr.attrib(default=full_dir_path('./'))
-    # 1 +ve sample, 1 -ve sample.
     negative_sample_ratio: float = attr.attrib(default=0.5)
-    # Batches of 32 (16 +ve, 16 -ve)
-    batch_size: int = attr.attrib(default=32)
-    # initiate_config overrides this in test_mode
-    epochs: int = attr.attrib(default=100)
-    # initiate_config overrides this in test_mode
+    batch_size: int = attr.attrib(default=16)
+    # update_params overrides this in test_mode
+    epochs: int = attr.attrib(default=5)
+    # update_params overrides this in test_mode
     steps_per_epoch: int = attr.attrib(default=200)
-    # initiate_config overrides this in test_mode
+    # update_params overrides this in test_mode
     validation_steps: int = attr.attrib(default=100)
+    optimizer_lr: float = attr.attrib(default=0.00001)
+    k_fold_count: int = attr.attrib(default=5)
+    dropout: float = attr.ib(default=0.2)
+    image_size: int = attr.ib(default=224)
 
     def get_inp_path(self, file_name):
         return self.input_data_dir + file_name
@@ -53,17 +57,16 @@ class Params(object):
     def get_out_path(self, file_name):
         return self.output_data_dir + file_name
 
-    def initiate_config(self):
+    def update_params(self, config_file_path):
         try:
-            config_path = path.abspath(path.dirname(__file__) + '/config.json')
-            with open(config_path, "r") as f:
+            with open(config_file_path, "r") as f:
                 config = json.load(f)
-                print("Before initiate_config:", self)
+                print("Before update_params:", self)
                 for k, v in config.items():
                     if k.endswith('_dir'):
                         v = full_dir_path(v)
                     self.__dict__[k] = v
-            print("After initiate_config:", self)
+            print("After update_params:", self)
         except Exception as e:
             print("Exception while loading config.json. This is okay when "
                   "running on kaggle. Error:", e)
@@ -71,23 +74,31 @@ class Params(object):
             self.epochs = min(self.epochs, 5)
             self.validation_steps = min(self.validation_steps, 5)
             self.steps_per_epoch = min(self.steps_per_epoch, 2)
+        return self
+
+
+@attr.s
+class PeopleTrainValSplit:
+    train_people: List[PersonId] = attr.ib(default=[])
+    train_relations: List[Tuple[PersonId, PersonId]] = attr.ib(default=[])
+    val_people: List[PersonId] = attr.ib(default=[])
+    val_relations: List[Tuple[PersonId, PersonId]] = attr.ib(default=[])
 
 
 class Data:
     @staticmethod
-    def _load_image_as_array(filepath: str) -> np.ndarray:
-        with open(filepath, 'rb') as f:
-            # noinspection PyTypeChecker
-            nparr = np.fromstring(f.read(), np.uint8)
-            # noinspection PyUnresolvedReferences
-            return cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    def _load_image_as_array(filepath: str, params: Params) -> np.ndarray:
+        img = image.load_img(filepath,
+                             target_size=(params.image_size, params.image_size))
+        img = np.array(img).astype(np.uint8)
+        return preprocess_input(img, version=2)
 
     @staticmethod
     def _load_train_images(params: Params) -> Dict[PersonId, List[np.ndarray]]:
         ret: Dict[PersonId, List[np.ndarray]] = {}
         all_images = glob(params.get_inp_path('train/') + "*/*/*.jpg")
         for name in all_images:
-            img_np = Data._load_image_as_array(name)
+            img_np = Data._load_image_as_array(name, params)
             p: PersonId = (name.split('/')[-3], name.split('/')[-2])
             if p not in ret:
                 ret[p] = []
@@ -103,7 +114,7 @@ class Data:
         ret: Dict[str, np.ndarray] = {}
         all_images = glob(params.get_inp_path('test/') + "*.jpg")
         for name in all_images:
-            img_np = Data._load_image_as_array(name)
+            img_np = Data._load_image_as_array(name, params)
             ret[name.split('/')[-1]] = img_np
             if params.test_mode and len(ret) > 500:
                 break
@@ -127,8 +138,8 @@ class Data:
                 p1, p2 = random.choice(relations)
                 if p1 not in images or p2 not in images:
                     continue
-                p1img, p2img = random.choice(images[p1]), \
-                               random.choice(images[p2])
+                p1img, p2img = random.choice(images[p1]), random.choice(
+                    images[p2])
                 x1.append(p1img)
                 x2.append(p2img)
                 out.append(1)
@@ -137,8 +148,8 @@ class Data:
                 p2 = random.choice(people)
                 if (p1, p2) in relations or (p2, p1) in relations:
                     continue
-                p1img, p2img = random.choice(images[p1]), \
-                               random.choice(images[p2])
+                p1img, p2img = random.choice(images[p1]), random.choice(
+                    images[p2])
                 x1.append(p1img)
                 x2.append(p2img)
                 out.append(0)
@@ -146,43 +157,16 @@ class Data:
 
     def __init__(self, params: Params):
         self.params = params
-        self.images: Dict[
-            PersonId, List[np.ndarray]] = Data._load_train_images(self.params)
         self.test_images: Dict[str, np.ndarray] = Data._load_test_images(
             self.params)
+        print("d2")
+        self.images: Dict[
+            PersonId, List[np.ndarray]] = Data._load_train_images(self.params)
+        print("d1")
 
-        # Generate validation relations and train relations.
-        # noinspection PyTypeChecker
-        self.val_relations: List[Tuple[PersonId, PersonId]] = []
-        # noinspection PyTypeChecker
-        self.train_relations: List[Tuple[PersonId, PersonId]] = []
-        get_person_id: Callable[[str], PersonId] = \
-            lambda x: (x.split('/')[0], x.split('/')[1])
-        relations_df: pandas.DataFrame = pandas.read_csv(
-            self.params.get_inp_path('train_relationships.csv'))
-        relations: List[Tuple[PersonId, PersonId]] = \
-            list(zip(list(relations_df["p1"].apply(get_person_id)),
-                     list(relations_df["p1"].apply(get_person_id))))
-        if not params.test_mode:
-            random.shuffle(relations)
-        _families = set(x[0][0] for x in relations)
-        _families.update(set(x[1][0] for x in relations))
-        _families = list(_families)
-        val_families: Set[str] = set(_families[:int(
-            len(_families) * self.params.families_val_split)])
-        for relation in relations:
-            if relation[0][0] in val_families or relation[1][0] in val_families:
-                self.val_relations.append(relation)
-            else:
-                self.train_relations.append(relation)
-        # Split people into train and validation.
-        self.train_people: List[PersonId] = []
-        self.val_people: List[PersonId] = []
-        for person in self.images.keys():
-            if person[0] in val_families:
-                self.val_people.append(person)
-            else:
-                self.train_people.append(person)
+        self.kfold_split = self.k_fold_split_people_and_relations(
+            params.k_fold_count)
+        print("d3")
 
         # Generate test data.
         # [img_par], [p1_image], [p2_image]
@@ -204,37 +188,78 @@ class Data:
                 len(failed_image_pairs)))
             print("pairs: ", ','.join(failed_image_pairs)[:500], " ...")
 
-    def get_test_data(self) -> \
-            Tuple[List[np.ndarray], List[np.ndarray], List[str]]:
+    def k_fold_split_people_and_relations(self, num_folds=5) \
+            -> List[PeopleTrainValSplit]:
+        relations_df: pandas.DataFrame = pandas.read_csv(
+            self.params.get_inp_path('train_relationships.csv'))
+        get_person_id: Callable[[str], PersonId] = lambda x: (
+            x.split('/')[0], x.split('/')[1])
+        relations: List[Tuple[PersonId, PersonId]] = list(
+            zip(list(relations_df["p1"].apply(get_person_id)),
+                list(relations_df["p1"].apply(get_person_id))))
+        if not self.params.test_mode:
+            random.shuffle(relations)
+        _families = set(x[0][0] for x in relations)
+        _families.update(set(x[1][0] for x in relations))
+        _families = list(_families)
+        ret = []
+        for i in range(num_folds):
+            split: PeopleTrainValSplit = PeopleTrainValSplit()
+            ret.append(split)
+            val_family_range_start = (len(_families) * i) // num_folds
+            # Dont allow more than 20% of data into validation set.
+            # TODO(dotslash): Is this needed?
+            val_family_range_end = val_family_range_start + min(
+                len(_families) // 5, len(_families) // num_folds)
+            val_families: Set[str] = set(
+                _families[val_family_range_start:val_family_range_end])
+            for relation in relations:
+                if relation[0][0] in val_families or \
+                        relation[1][0] in val_families:
+                    split.val_relations.append(relation)
+                else:
+                    split.train_relations.append(relation)
+            # Split people into train and validation.
+            for person in self.images.keys():
+                if person[0] in val_families:
+                    split.val_people.append(person)
+                else:
+                    split.train_people.append(person)
+        return ret
+
+    def get_test_data(self) -> Tuple[
+        List[np.ndarray], List[np.ndarray], List[str]]:
         return self.test_data
 
-    def val_batch_generator(self) -> Iterator[TrainValDataType]:
+    def val_batch_generator(self, fold_num) -> Iterator[TrainValDataType]:
+        split: PeopleTrainValSplit = self.kfold_split[fold_num]
         return Data._train_or_val_batch_generator(self.params, self.images,
-                                                  self.val_relations,
-                                                  self.val_people)
+                                                  split.val_relations,
+                                                  split.val_people)
 
-    def train_batch_generator(self) -> Iterator[TrainValDataType]:
+    def train_batch_generator(self, fold_num) -> Iterator[TrainValDataType]:
+        split: PeopleTrainValSplit = self.kfold_split[fold_num]
         return Data._train_or_val_batch_generator(self.params, self.images,
-                                                  self.train_relations,
-                                                  self.train_people)
+                                                  split.train_relations,
+                                                  split.train_people)
 
     def print_summary(self):
         print('Test data info: i1-shape: {} i2-shape: {}'.format(
             np.stack(self.test_data[0]).shape,
             np.stack(self.test_data[1]).shape))
-        for X, y in self.train_batch_generator():
+        for X, y in self.train_batch_generator(0):
             print('Train batch shapes: x1: {} x2: {} y: {}'.format(
                 X[0].shape, X[1].shape, len(y)))
             break
-        for X, y in self.val_batch_generator():
+        for X, y in self.val_batch_generator(0):
             print('Val batch shapes: x1: {} x2: {} y: {}'.format(
                 X[0].shape, X[1].shape, len(y)))
             break
 
 
-def create_model() -> Model:
-    input1: InputLayer = Input(shape=(224, 224, 3))
-    input2: InputLayer = Input(shape=(224, 224, 3))
+def create_model(params: Params) -> Model:
+    input1: InputLayer = Input(shape=(params.image_size, params.image_size, 3))
+    input2: InputLayer = Input(shape=(params.image_size, params.image_size, 3))
 
     base_model: Model = VGGFace(model='resnet50', include_top=False)
 
@@ -257,36 +282,69 @@ def create_model() -> Model:
     x = Concatenate()([Multiply()([x1, x2]), diff_squared])
     x = Dense(100, activation="relu")(x)
     # TODO(dotslash): Not sure about the dropout prob.
-    x = Dropout(0.2)(x)
+    x = Dropout(params.dropout)(x)
     out = Dense(1, activation="sigmoid")(x)
     model = Model([input1, input2], out)
     model.compile(loss="binary_crossentropy", metrics=['acc'],
-                  optimizer=Adam(0.00001))
+                  optimizer=Adam(params.optimizer_lr))
     model.summary()
     return model
 
 
-def main() -> None:
-    params: Params = Params()
-    params.initiate_config()
+class LoggingCallback(Callback):
+    def __init__(self):
+        super().__init__()
+        self.cur_epoch: int = 0
+
+    def on_epoch_begin(self, epoch, logs=None):
+        self.cur_epoch = epoch
+
+    def on_epoch_end(self, epoch, logs=None):
+        os.system('echo epoch {}'.format(epoch))
+
+    def on_batch_end(self, batch, logs=None):
+        if batch < 5 or (batch < 50 and batch % 10 == 0) or (batch % 50 == 0):
+            os.system('echo Training {}.{} ends'.format(self.cur_epoch, batch))
+
+
+def main():
+    params: Params = Params().update_params('./config.json')
+    os.system('echo loaded params')
+    print('echo loaded params')
+
     data: Data = Data(params)
     data.print_summary()
-    model = create_model()
-    save_best_model = ModelCheckpoint(params.get_out_path('best_model.h5'),
-                                      monitor='val_acc', verbose=1,
-                                      save_best_only=True)
-    control_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=10)
-    stop_early = EarlyStopping(monitor='val_loss', patience=20)
-    model.fit_generator(generator=data.train_batch_generator(),
-                        validation_data=data.val_batch_generator(),
-                        steps_per_epoch=params.steps_per_epoch,
-                        validation_steps=params.validation_steps,
-                        epochs=params.epochs,
-                        callbacks=[save_best_model, control_lr, stop_early])
-    predictions = model.predict_on_batch(
-        x=[data.test_data[0], data.test_data[1]])
+    os.system('echo Loaded data')
+    print('echo Loaded data')
+
+    predictions = [0] * len(data.test_data[0])
+    for i in range(params.k_fold_count):
+        model = create_model(params)
+        os.system('echo Created model')
+        print('echo Created model')
+        control_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.1,
+                                       patience=10,
+                                       verbose=1)
+        save_model = ModelCheckpoint(
+            params.get_out_path("kinship_{}.m5".format(i)), verbose=1,
+            save_best_only=True, period=1)
+        model.fit_generator(generator=data.train_batch_generator(i),
+                            validation_data=data.val_batch_generator(i),
+                            steps_per_epoch=params.steps_per_epoch,
+                            validation_steps=params.validation_steps,
+                            epochs=params.epochs, verbose=2,
+                            use_multiprocessing=True, workers=4,
+                            callbacks=[control_lr, LoggingCallback(),
+                                       save_model])
+
+        local_predictions = model.predict(
+            [data.test_data[0], data.test_data[1]],
+            batch_size=8).ravel().tolist()
+        for i, v in enumerate(local_predictions):
+            predictions[i] += (v / params.k_fold_count)
+
     submission = pandas.DataFrame(
-        data={'is_related': predictions.flatten(),
+        data={'is_related': predictions,
               'img_pair': data.test_data[2]})
     submission.to_csv(params.get_out_path("output.csv"), index=False)
 
