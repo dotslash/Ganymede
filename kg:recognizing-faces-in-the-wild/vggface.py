@@ -9,7 +9,7 @@ import attr
 import numpy as np
 import pandas
 from keras import Input, Model
-from keras.callbacks import ModelCheckpoint, ReduceLROnPlateau, Callback
+from keras.callbacks import ReduceLROnPlateau, Callback
 from keras.engine import InputLayer
 from keras.layers import Concatenate, GlobalMaxPool2D, Subtract, Multiply, \
     Dense, Dropout, GlobalAvgPool2D
@@ -41,7 +41,7 @@ class Params(object):
     negative_sample_ratio: float = attr.attrib(default=0.5)
     batch_size: int = attr.attrib(default=16)
     # update_params overrides this in test_mode
-    epochs: int = attr.attrib(default=5)
+    epochs: int = attr.attrib(default=50)
     # update_params overrides this in test_mode
     steps_per_epoch: int = attr.attrib(default=200)
     # update_params overrides this in test_mode
@@ -87,22 +87,22 @@ class PeopleTrainValSplit:
 
 class Data:
     @staticmethod
-    def _load_image_as_array(filepath: str, params: Params) -> np.ndarray:
+    def load_image_as_array(filepath: str, params: Params) -> np.ndarray:
         img = image.load_img(filepath,
                              target_size=(params.image_size, params.image_size))
-        img = np.array(img).astype(np.uint8)
+        img = np.array(img).astype(np.float)
         return preprocess_input(img, version=2)
 
     @staticmethod
-    def _load_train_images(params: Params) -> Dict[PersonId, List[np.ndarray]]:
-        ret: Dict[PersonId, List[np.ndarray]] = {}
+    def _load_train_images(params: Params) -> Dict[PersonId, List[str]]:
+        ret: Dict[PersonId, List[str]] = {}
         all_images = glob(params.get_inp_path('train/') + "*/*/*.jpg")
         for name in all_images:
-            img_np = Data._load_image_as_array(name, params)
+            # img_np = Data._load_image_as_array(name, params)
             p: PersonId = (name.split('/')[-3], name.split('/')[-2])
             if p not in ret:
                 ret[p] = []
-            ret[p].append(img_np)
+            ret[p].append(name)
             if params.test_mode and len(ret) > 200:
                 break
         print("Train+Val images: ", sum(len(x) for x in ret.values()))
@@ -110,12 +110,12 @@ class Data:
         return ret
 
     @staticmethod
-    def _load_test_images(params: Params) -> Dict[str, np.ndarray]:
-        ret: Dict[str, np.ndarray] = {}
+    def _load_test_images(params: Params) -> Dict[str, str]:
+        ret: Dict[str, str] = {}
         all_images = glob(params.get_inp_path('test/') + "*.jpg")
         for name in all_images:
-            img_np = Data._load_image_as_array(name, params)
-            ret[name.split('/')[-1]] = img_np
+            # img_np = Data._load_image_as_array(name, params)
+            ret[name.split('/')[-1]] = name
             if params.test_mode and len(ret) > 500:
                 break
         print("Test images: ", len(ret))
@@ -123,7 +123,7 @@ class Data:
 
     @staticmethod
     def _train_or_val_batch_generator(
-            params: Params, images: Dict[PersonId, List[np.ndarray]],
+            params: Params, images: Dict[PersonId, List[str]],
             relations: List[Tuple[PersonId, PersonId]],
             people: List[PersonId]) -> \
             Iterator[TrainValDataType]:
@@ -140,6 +140,8 @@ class Data:
                     continue
                 p1img, p2img = random.choice(images[p1]), random.choice(
                     images[p2])
+                p1img, p2img = Data.load_image_as_array(p1img, params), \
+                               Data.load_image_as_array(p2img, params)
                 x1.append(p1img)
                 x2.append(p2img)
                 out.append(1)
@@ -150,6 +152,8 @@ class Data:
                     continue
                 p1img, p2img = random.choice(images[p1]), random.choice(
                     images[p2])
+                p1img, p2img = Data.load_image_as_array(p1img, params), \
+                               Data.load_image_as_array(p2img, params)
                 x1.append(p1img)
                 x2.append(p2img)
                 out.append(0)
@@ -157,11 +161,11 @@ class Data:
 
     def __init__(self, params: Params):
         self.params = params
-        self.test_images: Dict[str, np.ndarray] = Data._load_test_images(
+        self.test_images: Dict[str, str] = Data._load_test_images(
             self.params)
         print("d2")
         self.images: Dict[
-            PersonId, List[np.ndarray]] = Data._load_train_images(self.params)
+            PersonId, List[str]] = Data._load_train_images(self.params)
         print("d1")
 
         self.kfold_split = self.k_fold_split_people_and_relations(
@@ -170,7 +174,7 @@ class Data:
 
         # Generate test data.
         # [img_par], [p1_image], [p2_image]
-        self.test_data: TestDataType = ([], [], [])
+        self.test_data: List[Tuple[str, str, str]] = []
         test_img_pairs = pandas.read_csv(
             self.params.get_inp_path('sample_submission.csv'))['img_pair']
         failed_image_pairs = []
@@ -178,9 +182,7 @@ class Data:
             img1, img2 = img_pair.split('-')
             img1, img2 = self.test_images.get(img1), self.test_images.get(img2)
             if img1 is not None and img2 is not None:
-                self.test_data[0].append(img1)
-                self.test_data[1].append(img2)
-                self.test_data[2].append(img_pair)
+                self.test_data.append((img1, img2, img_pair))
             else:
                 failed_image_pairs.append(img_pair)
         if failed_image_pairs:
@@ -227,8 +229,7 @@ class Data:
                     split.train_people.append(person)
         return ret
 
-    def get_test_data(self) -> Tuple[
-        List[np.ndarray], List[np.ndarray], List[str]]:
+    def get_test_data(self) -> List[Tuple[str, str, str]]:
         return self.test_data
 
     def val_batch_generator(self, fold_num) -> Iterator[TrainValDataType]:
@@ -244,17 +245,18 @@ class Data:
                                                   split.train_people)
 
     def print_summary(self):
-        print('Test data info: i1-shape: {} i2-shape: {}'.format(
-            np.stack(self.test_data[0]).shape,
-            np.stack(self.test_data[1]).shape))
-        for X, y in self.train_batch_generator(0):
-            print('Train batch shapes: x1: {} x2: {} y: {}'.format(
-                X[0].shape, X[1].shape, len(y)))
-            break
-        for X, y in self.val_batch_generator(0):
-            print('Val batch shapes: x1: {} x2: {} y: {}'.format(
-                X[0].shape, X[1].shape, len(y)))
-            break
+        # print('Test data info: i1-shape: {} i2-shape: {}'.format(
+        #     np.stack(self.test_data[0]).shape,
+        #     np.stack(self.test_data[1]).shape))
+        # for X, y in self.train_batch_generator(0):
+        #     print('Train batch shapes: x1: {} x2: {} y: {}'.format(
+        #         X[0].shape, X[1].shape, len(y)))
+        #     break
+        # for X, y in self.val_batch_generator(0):
+        #     print('Val batch shapes: x1: {} x2: {} y: {}'.format(
+        #         X[0].shape, X[1].shape, len(y)))
+        #     break
+        pass
 
 
 def create_model(params: Params) -> Model:
@@ -287,24 +289,30 @@ def create_model(params: Params) -> Model:
     model = Model([input1, input2], out)
     model.compile(loss="binary_crossentropy", metrics=['acc'],
                   optimizer=Adam(params.optimizer_lr))
-    model.summary()
     return model
 
 
-class LoggingCallback(Callback):
-    def __init__(self):
+class KaggleLoggingCB(Callback):
+    def __init__(self, model_ind):
         super().__init__()
         self.cur_epoch: int = 0
+        self.model_ind = model_ind
 
     def on_epoch_begin(self, epoch, logs=None):
         self.cur_epoch = epoch
 
     def on_epoch_end(self, epoch, logs=None):
-        os.system('echo epoch {}'.format(epoch))
+        message = 'model_{}: epoch {}'.format(self.model_ind, epoch)
+        os.system('echo {}'.format(message))
+        print(message)
 
     def on_batch_end(self, batch, logs=None):
-        if batch < 5 or (batch < 50 and batch % 10 == 0) or (batch % 50 == 0):
-            os.system('echo Training {}.{} ends'.format(self.cur_epoch, batch))
+        if batch % 50 != 0:
+            return
+        message = 'model_{}: Training {}.{} ends'.format(self.model_ind,
+                                                         self.cur_epoch, batch)
+        os.system('echo {}'.format(message))
+        print(message)
 
 
 def main():
@@ -317,35 +325,33 @@ def main():
     os.system('echo Loaded data')
     print('echo Loaded data')
 
-    predictions = [0] * len(data.test_data[0])
+    predictions = [0] * len(data.test_data)
     for i in range(params.k_fold_count):
         model = create_model(params)
+        if i == 0:
+            model.summary()
         os.system('echo Created model')
         print('echo Created model')
         control_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.1,
                                        patience=10,
                                        verbose=1)
-        save_model = ModelCheckpoint(
-            params.get_out_path("kinship_{}.m5".format(i)), verbose=1,
-            save_best_only=True, period=1)
         model.fit_generator(generator=data.train_batch_generator(i),
                             validation_data=data.val_batch_generator(i),
                             steps_per_epoch=params.steps_per_epoch,
                             validation_steps=params.validation_steps,
                             epochs=params.epochs, verbose=2,
                             use_multiprocessing=True, workers=4,
-                            callbacks=[control_lr, LoggingCallback(),
-                                       save_model])
-
-        local_predictions = model.predict(
-            [data.test_data[0], data.test_data[1]],
-            batch_size=8).ravel().tolist()
-        for i, v in enumerate(local_predictions):
-            predictions[i] += (v / params.k_fold_count)
+                            callbacks=[control_lr, KaggleLoggingCB(i)])
+        model.save(params.get_out_path("kinship_{}.m5".format(i)))
+        for ind, (i1, i2, _) in enumerate(data.test_data):
+            x1 = [Data.load_image_as_array(i1, params)]
+            x2 = [Data.load_image_as_array(i2, params)]
+            prediction = model.predict([x1, x2])[0][0]
+            predictions[ind] += (prediction / params.k_fold_count)
 
     submission = pandas.DataFrame(
         data={'is_related': predictions,
-              'img_pair': data.test_data[2]})
+              'img_pair': [x[2] for x in data.test_data]})
     submission.to_csv(params.get_out_path("output.csv"), index=False)
 
 
