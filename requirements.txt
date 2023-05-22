@@ -137,7 +137,7 @@ pyzmq==18.0.1
 QtAwesome==0.5.7
 qtconsole==4.5.0
 QtPy==1.8.0
-requests==2.22.0
+requests==2.31.0
 rope==0.14.0
 ruamel.yaml==0.15.96
 s3transfer==0.2.1
