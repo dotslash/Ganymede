@@ -21,7 +21,7 @@ Click==7.0
 cloudpickle==1.1.1
 colorcet==2.0.1
 contractions==0.0.18
-cryptography==2.7
+cryptography==41.0.0
 cycler==0.10.0
 dask==1.2.2
 datashader==0.7.0
