@@ -37,7 +37,7 @@ ftfy==5.5.1
 gast==0.2.2
 gensim==3.7.3
 graphviz==0.10.1
-grpcio==1.21.1
+grpcio==1.53.0
 h5py==2.9.0
 HeapDict==1.0.0
 holoviews==1.12.3
