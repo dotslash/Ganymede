@@ -117,7 +117,7 @@ pyct==0.4.6
 pydot==1.4.1
 pyemd==0.5.1
 pyflakes==2.1.1
-Pygments==2.4.1
+Pygments==2.15.0
 pylint==2.3.1
 pypandoc==1.4
 pyparsing==2.4.0
